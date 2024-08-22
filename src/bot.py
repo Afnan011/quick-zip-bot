@@ -1,3 +1,4 @@
+import asyncio
 from functools import partial
 from asyncio import get_running_loop
 from shutil import rmtree
@@ -24,13 +25,12 @@ MessageEvent = NewMessage.Event | Message
 
 logging.basicConfig(
     format='[%(levelname)s/%(asctime)s] %(name)s: %(message)s',
-    level=logging.INFO,
+    level=logging.DEBUG,  # Set to DEBUG for detailed logging
     handlers=[
         logging.StreamHandler(),
     ]
 )
 
-# dict to keep track of tasks for every user
 tasks: dict[int, list[int]] = {}
 
 bot = TelegramClient(
@@ -40,33 +40,20 @@ bot = TelegramClient(
 
 @bot.on(NewMessage(pattern='/add'))
 async def start_task_handler(event: MessageEvent):
-    """
-    Notifies the bot that the user is going to send the media.
-    """
     tasks[event.sender_id] = []
-
     await event.respond('OK, send me some files.')
-
     raise StopPropagation
 
 
 @bot.on(NewMessage(
     func=lambda e: e.sender_id in tasks and e.file is not None))
 async def add_file_handler(event: MessageEvent):
-    """
-    Stores the ID of messages sended with files by this user.
-    """
     tasks[event.sender_id].append(event.id)
-
     raise StopPropagation
 
 
 @bot.on(NewMessage(pattern='/zip (?P<name>\w+)'))
 async def zip_handler(event: MessageEvent):
-    """
-    Zips the media of messages corresponding to the IDs saved for this user in
-    tasks. The zip filename must be provided in the command.
-    """
     if event.sender_id not in tasks:
         await event.respond('You must use /add first.')
     elif not tasks[event.sender_id]:
@@ -76,8 +63,8 @@ async def zip_handler(event: MessageEvent):
             event.sender_id, ids=tasks[event.sender_id])
         zip_size = sum([m.file.size for m in messages])
 
-        if zip_size > 1024 * 1024 * 2000:   # zip_size > 1.95 GB approximately
-            await event.respond('Total filesize don\'t must exceed 2.0 GB.')
+        if zip_size > 1024 * 1024 * 2000:  # zip_size > 1.95 GB approximately
+            await event.respond('Total filesize must not exceed 2.0 GB.')
         else:
             root = STORAGE / f'{event.sender_id}/'
             zip_name = root / (event.pattern_match['name'] + '.zip')
@@ -98,9 +85,6 @@ async def zip_handler(event: MessageEvent):
 
 @bot.on(NewMessage(pattern='/cancel'))
 async def cancel_handler(event: MessageEvent):
-    """
-    Cleans the list of tasks for the user.
-    """
     try:
         tasks.pop(event.sender_id)
     except KeyError:
@@ -111,5 +95,10 @@ async def cancel_handler(event: MessageEvent):
     raise StopPropagation
 
 
+async def main():
+    await bot.start()
+    logging.info("Bot started successfully.")
+    await bot.run_until_disconnected()
+
 if __name__ == '__main__':
-    bot.run_until_disconnected()
+    asyncio.run(main())
