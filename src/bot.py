@@ -1,4 +1,4 @@
-import asyncio
+from flask import Flask
 from functools import partial
 from asyncio import get_running_loop
 from shutil import rmtree
@@ -25,18 +25,24 @@ MessageEvent = NewMessage.Event | Message
 
 logging.basicConfig(
     format='[%(levelname)s/%(asctime)s] %(name)s: %(message)s',
-    level=logging.DEBUG,  # Set to DEBUG for detailed logging
+    level=logging.INFO,
     handlers=[
         logging.StreamHandler(),
     ]
 )
 
+# dict to keep track of tasks for every user
 tasks: dict[int, list[int]] = {}
 
 bot = TelegramClient(
     'quick-zip-bot', api_id=API_ID, api_hash=API_HASH
 ).start(bot_token=BOT_TOKEN)
 
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return "Bot is running!"
 
 @bot.on(NewMessage(pattern='/add'))
 async def start_task_handler(event: MessageEvent):
@@ -44,13 +50,11 @@ async def start_task_handler(event: MessageEvent):
     await event.respond('OK, send me some files.')
     raise StopPropagation
 
-
 @bot.on(NewMessage(
     func=lambda e: e.sender_id in tasks and e.file is not None))
 async def add_file_handler(event: MessageEvent):
     tasks[event.sender_id].append(event.id)
     raise StopPropagation
-
 
 @bot.on(NewMessage(pattern='/zip (?P<name>\w+)'))
 async def zip_handler(event: MessageEvent):
@@ -72,7 +76,7 @@ async def zip_handler(event: MessageEvent):
             async for file in download_files(messages, CONC_MAX, root):
                 await get_running_loop().run_in_executor(
                     None, partial(add_to_zip, zip_name, file))
-            
+
             await event.respond('Done!', file=zip_name)
 
             await get_running_loop().run_in_executor(
@@ -81,7 +85,6 @@ async def zip_handler(event: MessageEvent):
         tasks.pop(event.sender_id)
 
     raise StopPropagation
-
 
 @bot.on(NewMessage(pattern='/cancel'))
 async def cancel_handler(event: MessageEvent):
@@ -94,11 +97,13 @@ async def cancel_handler(event: MessageEvent):
 
     raise StopPropagation
 
-
 async def main():
     await bot.start()
     logging.info("Bot started successfully.")
     await bot.run_until_disconnected()
 
 if __name__ == '__main__':
+    import threading
+    threading.Thread(target=lambda: app.run(host='0.0.0.0', port=5000)).start()
+    import asyncio
     asyncio.run(main())
